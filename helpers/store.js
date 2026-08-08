@@ -1,7 +1,10 @@
 // Google Sheets as the datastore (service account). Pure JS (googleapis).
 // Each tab = a table; row 1 = headers; data rows follow.
-// All Google calls go through a retry wrapper to survive transient failures
-// (free-tier traffic, slow API, occasional 403/429/5xx).
+//
+// IMPORTANT: Google Sheets API has a hard read quota (300 reads/min/user).
+// A page view previously read almost every table -> quota blows up -> 500s.
+// Fix: an in-memory cache so Google is only read occasionally (not per page
+// load), plus no retry on quota/permission errors (retrying a 429 makes it worse).
 const { google } = require("googleapis");
 
 const TABLES = {
@@ -17,17 +20,30 @@ let sheets = null;
 let sheetId = null;
 let writeQueue = Promise.resolve();
 
+// ---- in-memory cache (per table) ----
+const CACHE_TTL = 12000; // 12s — Google is re-read this often, not per request
+let cache = new Map();
+function cacheGet(table) { const c = cache.get(table); if (c && Date.now() - c.ts < CACHE_TTL) return c.data; return undefined; }
+function cacheSet(table, data) { cache.set(table, { ts: Date.now(), data }); }
+function cacheClear() { cache.clear(); }
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// Retry a Google API call up to 4 times with backoff.
+// Retry transient errors (network/5xx) but NOT quota/permission (429/403).
+function isRetryable(e) {
+  const status = e && (e.status || e.code);
+  if (status === 429 || status === 403) return false;
+  return true;
+}
 async function retryCall(fn) {
   let lastErr;
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 3; i++) {
     try {
       return await fn();
     } catch (e) {
       lastErr = e;
-      await sleep(250 * (i + 1));
+      if (!isRetryable(e)) throw e;
+      await sleep(200 * (i + 1));
     }
   }
   throw lastErr;
@@ -70,9 +86,7 @@ async function ensureTables() {
   const existing = new Set((meta.data.sheets || []).map((sh) => sh.properties.title));
   const add = [];
   for (const t of Object.keys(TABLES)) {
-    if (!existing.has(t)) {
-      add.push({ addSheet: { properties: { title: t } } });
-    }
+    if (!existing.has(t)) add.push({ addSheet: { properties: { title: t } } });
   }
   if (add.length) {
     await retryCall(() => s.spreadsheets.batchUpdate({ spreadsheetId: sheetId, requestBody: { requests: add } }));
@@ -80,29 +94,35 @@ async function ensureTables() {
   for (const t of Object.keys(TABLES)) {
     await ensureHeadings(t);
   }
+  cacheClear();
 }
 
-async function readSheet(tabName) {
-  const s = getSheets();
-  const res = await retryCall(() => s.spreadsheets.values.get({
-    spreadsheetId: sheetId,
-    range: `${tabName}!A1:ZZ100000`,
-  }));
-  const rows = res.data.values || [];
-  if (rows.length === 0) return [];
+function parseSheet(rows) {
+  if (!rows || rows.length === 0) return [];
   const headers = rows[0];
   const out = [];
   for (let i = 1; i < rows.length; i++) {
     const row = rows[i];
     if (!row || row.every((c) => c === "" || c === undefined || c === null)) continue;
     const obj = {};
-    headers.forEach((h, ci) => {
-      obj[h] = row[ci] !== undefined ? row[ci] : "";
-    });
-    obj.__row = i + 1; // 1-based sheet row
+    headers.forEach((h, ci) => { obj[h] = row[ci] !== undefined ? row[ci] : ""; });
+    obj.__row = i + 1;
     out.push(obj);
   }
   return out;
+}
+
+async function readSheet(tabName) {
+  const cached = cacheGet(tabName);
+  if (cached) return cached;
+  const s = getSheets();
+  const res = await retryCall(() => s.spreadsheets.values.get({
+    spreadsheetId: sheetId,
+    range: `${tabName}!A1:ZZ100000`,
+  }));
+  const data = parseSheet(res.data.values);
+  cacheSet(tabName, data);
+  return data;
 }
 
 async function nextId(tabName) {
@@ -135,6 +155,7 @@ async function insert(table, obj) {
       insertDataOption: "INSERT_ROWS",
       requestBody: { values: [TABLES[table].map((h) => (record[h] !== undefined ? record[h] : ""))] },
     }));
+    cacheClear();
     return id;
   });
 }
@@ -152,6 +173,7 @@ async function update(table, id, obj) {
       valueInputOption: "RAW",
       requestBody: { values: [TABLES[table].map((h) => (merged[h] !== undefined ? merged[h] : ""))] },
     }));
+    cacheClear();
     return true;
   });
 }
@@ -168,6 +190,7 @@ async function remove(table, id) {
       valueInputOption: "RAW",
       requestBody: { values: [TABLES[table].map(() => "")] },
     }));
+    cacheClear();
     return true;
   });
 }
