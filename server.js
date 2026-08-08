@@ -167,7 +167,7 @@ app.post("/api/auth/login", async (req, res) => {
   try {
     const username = String(req.body.username || "").trim().toLowerCase();
     const password = String(req.body.password || "");
-    const users = await store.list("users");
+    let users = await store.list("users");
     if (users.length === 0) {
       const name = String(req.body.name || "").trim();
       if (!username || !name || password.length < 6) {
@@ -176,6 +176,8 @@ app.post("/api/auth/login", async (req, res) => {
       await store.insert("users", {
         username, password_hash: await hashPassword(password), name, role: "admin", company_id: "", active: 1,
       });
+      // Re-read: the admin was just created, so the old list is stale.
+      users = await store.list("users");
     }
     const user = users.find((u) => u.username === username);
     if (!user || Number(user.active) !== 1) return res.status(401).json({ ok: false, error: "Неверный логин или пароль" });
