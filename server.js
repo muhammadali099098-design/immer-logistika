@@ -187,8 +187,8 @@ app.post("/api/auth/login", async (req, res) => {
     res.setHeader("set-cookie", makeSessionCookie(signSession(Number(user.id))));
     res.json({ ok: true, user: publicUser });
   } catch (e) {
-    console.error(e);
-    res.status(500).json({ ok: false, error: "Ошибка сервера" });
+    console.error("login error:", e);
+    res.status(500).json({ ok: false, error: "Ошибка сервера: " + (e && e.message ? e.message : String(e)) });
   }
 });
 
