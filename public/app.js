@@ -86,15 +86,17 @@ async function loadStats() {
 
 // ---------- boot ----------
 async function boot() {
+  // Show the login screen right away so the page is never blank while the
+  // free-tier instance wakes up. Then check the session in the background.
+  state.view = "login";
+  render();
   const r = await api("/api/me");
   if (r.data.ok && r.data.user) {
     state.user = r.data.user;
     state.view = "stock";
     await loadAll();
-  } else {
-    state.view = "login";
+    render();
   }
-  render();
 }
 
 async function loadAll() {

@@ -1,5 +1,7 @@
 // Google Sheets as the datastore (service account). Pure JS (googleapis).
 // Each tab = a table; row 1 = headers; data rows follow.
+// All Google calls go through a retry wrapper to survive transient failures
+// (free-tier traffic, slow API, occasional 403/429/5xx).
 const { google } = require("googleapis");
 
 const TABLES = {
@@ -14,6 +16,22 @@ const TABLES = {
 let sheets = null;
 let sheetId = null;
 let writeQueue = Promise.resolve();
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Retry a Google API call up to 4 times with backoff.
+async function retryCall(fn) {
+  let lastErr;
+  for (let i = 0; i < 4; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastErr = e;
+      await sleep(250 * (i + 1));
+    }
+  }
+  throw lastErr;
+}
 
 function getSheets() {
   if (sheets) return sheets;
@@ -38,17 +56,17 @@ function write(fn) {
 
 async function ensureHeadings(tabName) {
   const s = getSheets();
-  await s.spreadsheets.values.update({
+  await retryCall(() => s.spreadsheets.values.update({
     spreadsheetId: sheetId,
     range: `${tabName}!A1`,
     valueInputOption: "RAW",
     requestBody: { values: [TABLES[tabName]] },
-  });
+  }));
 }
 
 async function ensureTables() {
   const s = getSheets();
-  const meta = await s.spreadsheets.get({ spreadsheetId: sheetId });
+  const meta = await retryCall(() => s.spreadsheets.get({ spreadsheetId: sheetId }));
   const existing = new Set((meta.data.sheets || []).map((sh) => sh.properties.title));
   const add = [];
   for (const t of Object.keys(TABLES)) {
@@ -57,7 +75,7 @@ async function ensureTables() {
     }
   }
   if (add.length) {
-    await s.spreadsheets.batchUpdate({ spreadsheetId: sheetId, requestBody: { requests: add } });
+    await retryCall(() => s.spreadsheets.batchUpdate({ spreadsheetId: sheetId, requestBody: { requests: add } }));
   }
   for (const t of Object.keys(TABLES)) {
     await ensureHeadings(t);
@@ -66,10 +84,10 @@ async function ensureTables() {
 
 async function readSheet(tabName) {
   const s = getSheets();
-  const res = await s.spreadsheets.values.get({
+  const res = await retryCall(() => s.spreadsheets.values.get({
     spreadsheetId: sheetId,
     range: `${tabName}!A1:ZZ100000`,
-  });
+  }));
   const rows = res.data.values || [];
   if (rows.length === 0) return [];
   const headers = rows[0];
@@ -110,13 +128,13 @@ async function insert(table, obj) {
     const id = await nextId(table);
     const record = { ...obj, id };
     const s = getSheets();
-    await s.spreadsheets.values.append({
+    await retryCall(() => s.spreadsheets.values.append({
       spreadsheetId: sheetId,
       range: `${table}!A1`,
       valueInputOption: "RAW",
       insertDataOption: "INSERT_ROWS",
       requestBody: { values: [TABLES[table].map((h) => (record[h] !== undefined ? record[h] : ""))] },
-    });
+    }));
     return id;
   });
 }
@@ -128,12 +146,12 @@ async function update(table, id, obj) {
     if (!target) return false;
     const merged = { ...target, ...obj, id };
     const s = getSheets();
-    await s.spreadsheets.values.update({
+    await retryCall(() => s.spreadsheets.values.update({
       spreadsheetId: sheetId,
       range: `${table}!A${target.__row}`,
       valueInputOption: "RAW",
       requestBody: { values: [TABLES[table].map((h) => (merged[h] !== undefined ? merged[h] : ""))] },
-    });
+    }));
     return true;
   });
 }
@@ -144,12 +162,12 @@ async function remove(table, id) {
     const target = rows.find((r) => Number(r.id) === Number(id));
     if (!target) return false;
     const s = getSheets();
-    await s.spreadsheets.values.update({
+    await retryCall(() => s.spreadsheets.values.update({
       spreadsheetId: sheetId,
       range: `${table}!A${target.__row}:${String.fromCharCode(64 + TABLES[table].length)}${target.__row}`,
       valueInputOption: "RAW",
       requestBody: { values: [TABLES[table].map(() => "")] },
-    });
+    }));
     return true;
   });
 }
