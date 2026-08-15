@@ -166,74 +166,6 @@ function renderLogin() {
 // ---------- summary (Завод → Граница, с фильтрами и загрузками) ----------
 function viewSummary() {
   const isAdmin = state.user.role === "admin";
-  const tab = state.summaryTab || "summary";
-  const tabBar = `<div style="display:flex;gap:8px;margin-bottom:14px">
-    <button class="btn ${tab === "summary" ? "" : "ghost"}" data-action="sum-tab" data-tab="summary">Сводка</button>
-    <button class="btn ${tab === "loadings" ? "" : "ghost"}" data-action="sum-tab" data-tab="loadings">Загрузки</button>
-  </div>`;
-  if (tab === "loadings") {
-    const TF = state.truckFilters || (state.truckFilters = {});
-    const mfT = (f, label, options) => {
-      const sel = TF[f] || [];
-      const allOpts = [...new Set([...options, ...sel])];
-      return `<div class="mfilter" data-field="${f}" data-store="truck"><button type="button" class="f-input mf-toggle" style="text-align:left">${label}${sel.length ? ` (${sel.length})` : ""} ▾</button>
-        <div class="mfilter-pop" hidden>
-          <input class="f-input mf-search" placeholder="Поиск…">
-          <div class="mf-list">${allOpts.map((o) => `<label class="mf-opt"><input type="checkbox" value="${esc(o)}" ${sel.includes(o) ? "checked" : ""}>${esc(o)}</label>`).join("")}</div>
-          <div style="display:flex;gap:6px;margin-top:6px"><button type="button" class="btn ghost sm mf-clear">Сбросить</button><button type="button" class="btn sm mf-apply">Готово</button></div>
-        </div></div>`;
-    };
-let trucks = state.trucks;
-  if (state.sumLogId) trucks = trucks.filter((t) => Number(t.logistics_id) === Number(state.sumLogId));
-  if (TF.truck_no && TF.truck_no.length) trucks = trucks.filter((t) => TF.truck_no.includes(t.truck_no));
-    if (TF.logistics && TF.logistics.length) trucks = trucks.filter((t) => TF.logistics.includes(t.logistics_name || ""));
-    if (TF.factory && TF.factory.length) trucks = trucks.filter((t) => TF.factory.includes(t.factory_name || ""));
-    if (TF.invoice && TF.invoice.length) trucks = trucks.filter((t) => TF.invoice.includes(String(t.invoice_no)));
-    if (TF.order && TF.order.length) trucks = trucks.filter((t) => TF.order.includes(String(t.order_no)));
-    const tNoOpts = [...new Set(state.trucks.map((t) => t.truck_no).filter(Boolean))].sort();
-    const tLogOpts = [...new Set(state.trucks.map((t) => t.logistics_name).filter(Boolean))].sort();
-    const tFacOpts = [...new Set(state.trucks.map((t) => t.factory_name).filter(Boolean))].sort();
-    const tInvOpts = [...new Set(state.trucks.map((t) => String(t.invoice_no)).filter(Boolean))].sort();
-    const tOrderOpts = [...new Set(state.trucks.map((t) => String(t.order_no)).filter(Boolean))].sort();
-    const tHas = Object.keys(TF).some((k) => (TF[k] || []).length);
-    return `
-      <div class="toolbar"><div><h1>Сводка: Завод-Граница</h1><p class="sub" style="margin:0">Фуры, загруженные с заводов.</p></div>
-      <button data-action="open-truck">Записать загрузку</button></div>
-      ${tabBar}
-      ${tHas ? `<div style="margin-bottom:12px"><button class="btn ghost" data-action="truck-clear">Сбросить фильтры</button></div>` : ""}
-      <div class="tbl-wrap"><table class="table">
-        <thead>
-          <tr><th>Order №</th><th>Фура</th><th>Дата</th>${isAdmin ? "<th>Логист</th>" : ""}<th>Завод</th><th>Инвойс</th><th>Товар</th><th>CBM</th><th></th></tr>
-          <tr style="background:var(--surface-2)"><th>${mfT("order", "Order №", tOrderOpts)}</th><th>${mfT("truck_no", "Фура", tNoOpts)}</th><th></th>${isAdmin ? `<th>${mfT("logistics", "Логист", tLogOpts)}</th>` : ""}<th>${mfT("factory", "Завод", tFacOpts)}</th><th>${mfT("invoice", "Инвойс", tInvOpts)}</th><th></th><th></th><th></th></tr>
-        </thead>
-        <tbody>
-          ${trucks.length === 0 ? `<tr><td colspan="${isAdmin ? 8 : 7}"><div class="emptystate">Загрузок пока нет. Нажмите «Записать загрузку».</div></td></tr>` : trucks.map((t) => {
-            const truckCbm = t.lines.reduce((a, li) => { const m = state.models.find((x) => Number(x.id) === Number(li.model_id)); return a + (Number(li.qty) || 0) * (m ? Number(m.cbm_per_pc) || 0 : 0); }, 0);
-            return `<tr>
-              <td><b>${esc(t.order_no || "—")}</b></td>
-              <td>${esc(t.truck_no || "—")}</td>
-              <td>${fmtDate(t.date)}</td>
-              ${isAdmin ? `<td>${esc(t.logistics_name)}</td>` : ""}
-              <td>${esc(t.factory_name || "—")}</td>
-              <td style="color:var(--muted)">${esc(t.invoice_no || "—")}</td>
-              <td style="max-width:260px">${t.lines.map((li) => `${esc(li.model_name)} × ${fmtNum(li.qty)}`).join(", ") || "—"}</td>
-              <td style="color:var(--muted)">${truckCbm ? truckCbm.toFixed(2) : "—"}</td>
-              <td style="white-space:nowrap">
-                <button class="btn link sm" data-action="edit-truck" data-id="${t.id}">✎</button>
-                <button class="btn link danger sm" data-action="del-truck" data-id="${t.id}">${TRASH}</button>
-              </td>
-            </tr>`;
-          }).join("")}
-        </tbody>
-      </table></div>
-      <div class="card" style="margin-top:16px">
-        <div style="font-weight:600;margin-bottom:8px">Логисты:</div>
-        <div style="display:flex;flex-wrap:wrap;gap:8px">
-          <button class="btn ${!state.sumLogId ? "" : "ghost"}" data-action="open-log-goods" data-id="">Все логисты</button>
-          ${state.logistics.map((l) => `<button class="btn ${Number(state.sumLogId) === Number(l.id) ? "" : "ghost"}" data-action="open-log-goods" data-id="${l.id}">${esc(l.name)}</button>`).join("")}
-        </div>
-      </div>`;
-  }
   const q = state.sumQ.trim().toLowerCase();
   const F = state.sumFilters;
   let rows = state.stock;
@@ -241,8 +173,8 @@ let trucks = state.trucks;
   if (q) rows = rows.filter((r) => String(r.model_name).toLowerCase().includes(q));
   if (F.model && F.model.length) rows = rows.filter((r) => F.model.includes(r.model_name));
   if (F.category && F.category.length) rows = rows.filter((r) => F.category.includes(r.category));
-  if (F.logistics && F.logistics.length && isAdmin) rows = rows.filter((r) => F.logistics.includes(r.logistics_name));
   if (F.factory && F.factory.length) rows = rows.filter((r) => F.factory.includes(r.factory_name));
+  if (F.truck && F.truck.length) rows = rows.filter((r) => (r.load_trucks || []).some((t) => F.truck.includes(t.truck_no)));
   if (F.invoice && F.invoice.length) rows = rows.filter((r) => F.invoice.includes(String(r.invoice_no)));
   if (F.order && F.order.length) rows = rows.filter((r) => F.order.includes(String(r.order_no)));
   if (F.status && F.status.length) rows = rows.filter((r) => F.status.includes(r.shipment_status));
@@ -255,6 +187,7 @@ let trucks = state.trucks;
   const modelOpts = distinct((r) => r.model_name);
   const cats = distinct((r) => r.category);
   const facs = distinct((r) => r.factory_name);
+  const truckOpts = [...new Set(state.stock.flatMap((r) => (r.load_trucks || []).map((t) => t.truck_no)).filter(Boolean))].sort();
   const invOpts = distinct((r) => r.invoice_no);
   const orderOpts = distinct((r) => r.order_no);
   const arr = (f) => state.sumFilters[f] || [];
@@ -279,35 +212,43 @@ let trucks = state.trucks;
     <div style="display:flex;gap:8px">
       ${hasF || q ? `<button class="btn ghost" data-action="summary-clear">Сбросить фильтры</button>` : ""}
       <button class="btn ghost" data-action="export-summary">Скачать Excel</button>
+      <button data-action="open-truck">Записать загрузку</button>
     </div></div>
-    ${tabBar}
+    <div class="card" style="margin-bottom:14px">
+      <div style="font-weight:600;margin-bottom:8px">Логисты — нажмите, чтобы показать в таблице только его товары:</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px">
+        <button class="btn ${!state.sumLogId ? "" : "ghost"}" data-action="open-log-goods" data-id="">Все логисты</button>
+        ${state.logistics.map((l) => `<button class="btn ${Number(state.sumLogId) === Number(l.id) ? "" : "ghost"}" data-action="open-log-goods" data-id="${l.id}">${esc(l.name)}</button>`).join("")}
+      </div>
+    </div>
     <div class="tbl-wrap"><table class="table">
       <thead>
-        <tr><th>Order №</th><th>Модель</th><th>Категория</th>${isAdmin ? "<th>Логист</th>" : ""}<th>Завод</th><th>Инвойс</th><th>Пришло</th><th>Дата забора</th><th>Отгружено</th><th>Дата отправки</th><th>Остаток</th><th>Общий куб</th><th>Дней</th><th>Статус</th></tr>
+        <tr><th>Order №</th><th>Модель</th><th>Категория</th><th>Завод</th><th>Инвойс</th><th>Фура</th><th>Пришло</th><th>Дата забора</th><th>Отгружено</th><th>Дата отправки</th><th>Остаток</th><th>Общий куб</th><th>Дней</th><th>Статус</th></tr>
         <tr style="background:var(--surface-2)">
           <th>${mf("order", "Order №", orderOpts)}</th>
           <th>${mf("model", "Модель", modelOpts)}</th>
           <th>${mf("category", "Категория", cats)}</th>
-          ${isAdmin ? `<th>${mf("logistics", "Логист", state.logistics.map((l) => l.name))}</th>` : ""}
           <th>${mf("factory", "Завод", facs)}</th>
           <th>${mf("invoice", "Инвойс", invOpts)}</th>
+          <th>${mf("truck", "Фура", truckOpts)}</th>
           <th></th><th></th><th></th><th></th><th></th><th></th>
           <th>${rng("days", "number")}</th>
           <th>${mf("status", "Статус", ["отправлен", "частично", "в складе"])}</th>
         </tr>
       </thead>
       <tbody>
-        ${rows.length === 0 ? `<tr><td colspan="${isAdmin ? 13 : 12}"><div class="emptystate">Нет данных под фильтр. Добавьте загрузку.</div></td></tr>` : rows.map((r) => {
+        ${rows.length === 0 ? `<tr><td colspan="14"><div class="emptystate">Нет данных под фильтр. Добавьте загрузку.</div></td></tr>` : rows.map((r) => {
           const totalCbm = r.qty * (Number(r.cbm_per_pc) || 0);
           const loadStr = (r.load_trucks || []).map((t) => `${esc(t.truck_no)}×${fmtNum(t.qty)}`).join(", ");
           const shipStr = (r.ship_trucks || []).map((t) => `${esc(t.truck_no)}×${fmtNum(t.qty)}`).join(", ");
+          const truckNos = [...new Set((r.load_trucks || []).map((t) => t.truck_no).filter(Boolean))].join(", ");
           return `<tr>
           <td><b>${esc(r.order_no || "—")}</b></td>
           <td>${esc(r.model_name)}</td>
           <td style="color:var(--muted)">${esc(r.category || "—")}</td>
-          ${isAdmin ? `<td>${esc(r.logistics_name)}</td>` : ""}
           <td>${esc(r.factory_name || "—")}</td>
           <td style="color:var(--muted)">${esc(r.invoice_no || "—")}</td>
+          <td style="color:var(--muted)">${truckNos || "—"}</td>
           <td style="color:var(--muted)">${fmtNum(r.received)}</td>
           <td style="color:var(--muted)">${r.pickup_date ? fmtDate(r.pickup_date) : "—"}</td>
           <td>${fmtNum(r.shipped)}${shipStr ? ` <span style="color:var(--muted);font-size:11px">(${shipStr})</span>` : ""}</td>
@@ -321,20 +262,13 @@ let trucks = state.trucks;
       </tbody>
       <tfoot>
         <tr style="font-weight:700;background:var(--surface-2)">
-          <td></td><td>Итого</td><td></td>${isAdmin ? "<td></td>" : ""}<td></td><td></td>
+          <td></td><td>Итого</td><td></td><td></td><td></td><td></td>
           <td>${fmtNum(rows.reduce((a, r) => a + r.received, 0))}</td><td></td>
           <td>${fmtNum(rows.reduce((a, r) => a + r.shipped, 0))}</td><td></td>
           <td>${fmtNum(tQty)}</td><td>${fmtNum(tCbm.toFixed(2))}</td><td></td><td></td>
         </tr>
       </tfoot>
     </table></div>
-    <div class="card" style="margin-top:16px">
-      <div style="font-weight:600;margin-bottom:8px">Логисты — нажмите, чтобы показать в таблице только его товары:</div>
-      <div style="display:flex;flex-wrap:wrap;gap:8px">
-        <button class="btn ${!state.sumLogId ? "" : "ghost"}" data-action="open-log-goods" data-id="">Все логисты</button>
-        ${state.logistics.map((l) => `<button class="btn ${Number(state.sumLogId) === Number(l.id) ? "" : "ghost"}" data-action="open-log-goods" data-id="${l.id}">${esc(l.name)}</button>`).join("")}
-      </div>
-    </div>
     <p class="sub" style="margin-top:10px">Остаток = пришло − отгружено. В колонке «Отгружено» в скобках — номера фур, которыми отправлено. Оплата за логистику — в разделе «Отгрузки».</p>`;
 }
 
@@ -660,11 +594,12 @@ function openPayOrder(orderNo) {
 
 function exportSummaryCSV() {
   const rows = state.sumRows || [];
-  const head = ["Модель", "Категория", "Логист", "Завод", "Инвойс", "Пришло", "Дата забора", "Отгружено", "Дата отправки", "Остаток", "Общий куб", "Дней", "Статус"];
+  const head = ["Order №", "Модель", "Категория", "Завод", "Инвойс", "Фура", "Пришло", "Дата забора", "Отгружено", "Дата отправки", "Остаток", "Общий куб", "Дней", "Статус"];
   const csv = (v) => `"${String(v == null ? "" : v).replace(/"/g, '""')}"`;
   const lines = [head.map(csv).join(";")];
   rows.forEach((r) => {
-    lines.push([r.model_name, r.category, r.logistics_name, r.factory_name, r.invoice_no, r.received, r.pickup_date, r.shipped, r.send_date_tashkent, r.qty, (r.qty * (Number(r.cbm_per_pc) || 0)).toFixed(2), r.days_sitting, r.shipment_status].map(csv).join(";"));
+    const truckNos = [...new Set((r.load_trucks || []).map((t) => t.truck_no).filter(Boolean))].join(", ");
+    lines.push([r.order_no || "", r.model_name, r.category, r.factory_name, r.invoice_no, truckNos, r.received, r.pickup_date, r.shipped, r.send_date_tashkent, r.qty, (r.qty * (Number(r.cbm_per_pc) || 0)).toFixed(2), r.days_sitting, r.shipment_status].map(csv).join(";"));
   });
   const blob = new Blob(["\uFEFF" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
   const a = document.createElement("a");
